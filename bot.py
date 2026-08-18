@@ -1,77 +1,61 @@
 import os
-import asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from flask import Flask, request
+import requests
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_1 = "https://t.me/+EVGePIY_vgk4MDU9"
-CHANNEL_2 = "https://t.me/+XVkf38u9H6s2Y2Q1"
+BOT_TOKEN=os.environ["BOT_TOKEN"]
+WEBHOOK_SECRET=os.environ.get("WEBHOOK_SECRET","change_me")
+CHANNEL_1="https://t.me/+EVGePIY_vgk4MDU9"
+CHANNEL_2="https://t.me/+XVkf38u9H6s2Y2Q1"
+app=Flask(__name__)
+users={}
 
-users = {}
+def tg(method,data):
+    r=requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/{method}",json=data,timeout=30)
+    r.raise_for_status()
+    return r.json()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    users[update.effective_user.id] = {"photo": None, "reference": None, "verified": False}
-    await update.message.reply_text(
-        "📸 પહેલા તમારી photo upload કરો.\n\n"
-        "આ Demo/Test Bot છે — કોઈ actual clothes-change result આપશે નહીં."
-    )
+def send(chat_id,text,markup=None):
+    d={"chat_id":chat_id,"text":text}
+    if markup:d["reply_markup"]={"inline_keyboard":markup}
+    tg("sendMessage",d)
 
-async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    state = users.setdefault(uid, {"photo": None, "reference": None, "verified": False})
-    if not state["photo"]:
-        state["photo"] = True
-        await update.message.reply_text("✅ Your photo received.\n\n🖼️ હવે reference clothes photo upload કરો.")
-    elif not state["reference"]:
-        state["reference"] = True
-        kb = [[InlineKeyboardButton("👕 Change Clothes", callback_data="change")]]
-        await update.message.reply_text(
-            "✅ Reference photo received.",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+@app.get("/")
+def health(): return "Telegram demo bot is running."
 
-async def change(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query
-    await q.answer()
-    kb=[
-        [InlineKeyboardButton("🔵 Join Channel 1", url=CHANNEL_1)],
-        [InlineKeyboardButton("🔵 Join Channel 2", url=CHANNEL_2)],
-        [InlineKeyboardButton("✅ I Joined / Verify", callback_data="verify")]
-    ]
-    await q.message.reply_text(
-        "📢 Demo આગળ વધારવા માટે બંને channels join કરો:",
-        reply_markup=InlineKeyboardMarkup(kb)
-    )
+@app.post("/telegram")
+def webhook():
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token")!=WEBHOOK_SECRET:return "forbidden",403
+    u=request.get_json(silent=True) or {}
+    m=u.get("message"); c=u.get("callback_query")
+    if m:
+        chat=m["chat"]["id"]; uid=m["from"]["id"]
+        if m.get("text")=="/start":
+            users[uid]={"photo":False,"reference":False}
+            send(chat,"📸 પહેલા તમારી photo upload કરો.\n\nઆ Demo/Test Bot છે — કોઈ actual clothes-change result આપશે નહીં.")
+            return "ok"
+        if m.get("photo"):
+            s=users.setdefault(uid,{"photo":False,"reference":False})
+            if not s["photo"]:
+                s["photo"]=True; send(chat,"✅ Your photo received.\n\n🖼️ હવે reference clothes photo upload કરો.")
+            elif not s["reference"]:
+                s["reference"]=True
+                send(chat,"✅ Reference photo received.",[[{"text":"👕 Change Clothes","callback_data":"change"}]])
+            return "ok"
+    if c:
+        chat=c["message"]["chat"]["id"]; uid=c["from"]["id"]; data=c.get("data")
+        tg("answerCallbackQuery",{"callback_query_id":c["id"]})
+        s=users.setdefault(uid,{"photo":False,"reference":False})
+        if data=="change":
+            if not(s["photo"] and s["reference"]): send(chat,"પહેલા બંને photos upload કરો.")
+            else: send(chat,"📢 Demo આગળ વધારવા માટે બંને channels join કરો:",[
+                [{"text":"🔵 Join Channel 1","url":CHANNEL_1}],
+                [{"text":"🔵 Join Channel 2","url":CHANNEL_2}],
+                [{"text":"✅ I Joined / Verify","callback_data":"verify"}]])
+        elif data=="verify":
+            send(chat,"⏳ Demo Processing શરૂ થયું...\n\nEstimated time: 15–30 minutes.")
+            send(chat,"❌ Demo Token Limit Reached\n\nઆ Demo/Test Bot છે. કોઈ actual clothes-change result generate કરવામાં આવ્યો નથી.")
+        return "ok"
+    return "ok"
 
-async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query
-    await q.answer()
-    uid=q.from_user.id
-    if uid not in users or not users[uid]["photo"] or not users[uid]["reference"]:
-        await q.message.reply_text("પહેલા બંને photos upload કરો.")
-        return
-    # Telegram membership check requires the bot to be admin in both channels.
-    # Private invite links above are used for joining; channel IDs must be configured
-    # for strict automatic verification.
-    await q.message.reply_text(
-        "⏳ Demo Processing શરૂ થયું...\n\n"
-        "Estimated time: 15–30 minutes."
-    )
-    await asyncio.sleep(5)
-    await q.message.reply_text(
-        "❌ Demo Token Limit Reached\n\n"
-        "આ Demo/Test Bot છે. કોઈ actual clothes-change result generate કરવામાં આવ્યો નથી."
-    )
-
-def main():
-    if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN environment variable is missing.")
-    app=Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(change, pattern="^change$"))
-    app.add_handler(CallbackQueryHandler(verify, pattern="^verify$"))
-    app.add_handler(MessageHandler(filters.PHOTO, photo))
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__":
+    app.run(host="0.0.0.0",port=int(os.environ.get("PORT","10000")))
