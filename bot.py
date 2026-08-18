@@ -39,14 +39,15 @@ def send(chat_id, text, markup=None):
 
 @app.get("/")
 def health():
-    return "Telegram demo bot is running."
+    return "Telegram bot is running."
 
 
 @app.post("/telegram")
 def webhook():
 
-    # Verify Telegram webhook secret
-    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+    if request.headers.get(
+        "X-Telegram-Bot-Api-Secret-Token"
+    ) != WEBHOOK_SECRET:
         return "forbidden", 403
 
     update = request.get_json(silent=True) or {}
@@ -54,9 +55,10 @@ def webhook():
     message = update.get("message")
     callback = update.get("callback_query")
 
-    # -------------------------
+    # =========================
     # MESSAGE HANDLER
-    # -------------------------
+    # =========================
+
     if message:
 
         chat_id = message["chat"]["id"]
@@ -72,9 +74,7 @@ def webhook():
 
             send(
                 chat_id,
-                "📸 Please upload your photo first.\n\n"
-                "This is a Demo/Test Bot — "
-                "no actual clothes-change result will be generated."
+                "📸 Please upload your photo first."
             )
 
             return "ok"
@@ -121,16 +121,16 @@ def webhook():
 
             return "ok"
 
-    # -------------------------
+    # =========================
     # BUTTON HANDLER
-    # -------------------------
+    # =========================
+
     if callback:
 
         chat_id = callback["message"]["chat"]["id"]
         user_id = callback["from"]["id"]
         data = callback.get("data")
 
-        # Remove button loading
         tg(
             "answerCallbackQuery",
             {
@@ -146,10 +146,13 @@ def webhook():
             }
         )
 
-        # Change Clothes button
+        # Change Clothes
         if data == "change":
 
-            if not (user["photo"] and user["reference"]):
+            if not (
+                user["photo"]
+                and user["reference"]
+            ):
 
                 send(
                     chat_id,
@@ -160,7 +163,7 @@ def webhook():
 
                 send(
                     chat_id,
-                    "📢 To continue the demo, please join both channels:",
+                    "📢 Please join both channels to continue:",
                     [
                         [
                             {
@@ -183,20 +186,13 @@ def webhook():
                     ]
                 )
 
-        # Verify button
+        # Verify
         elif data == "verify":
 
             send(
                 chat_id,
-                "⏳ Demo processing has started...\n\n"
-                "Estimated time: 15–30 minutes."
-            )
-
-            send(
-                chat_id,
-                "❌ Demo Token Limit Reached\n\n"
-                "This is a Demo/Test Bot. "
-                "No actual clothes-change result has been generated."
+                "⏳ Processing your request...\n\n"
+                "Please wait while your request is being processed."
             )
 
         return "ok"
@@ -209,4 +205,4 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=int(os.environ.get("PORT", "10000"))
-        )
+                )
