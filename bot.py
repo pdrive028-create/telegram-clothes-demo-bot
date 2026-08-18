@@ -5,12 +5,7 @@ import requests
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change_me")
 
-CHANNEL_1 = "https://t.me/+EVGePIY_vgk4MDU9"
-CHANNEL_2 = "https://t.me/+XVkf38u9H6s2Y2Q1"
-
 app = Flask(__name__)
-
-users = {}
 
 
 def tg(method, data):
@@ -23,18 +18,14 @@ def tg(method, data):
     return r.json()
 
 
-def send(chat_id, text, markup=None):
-    data = {
-        "chat_id": chat_id,
-        "text": text
-    }
-
-    if markup:
-        data["reply_markup"] = {
-            "inline_keyboard": markup
+def send(chat_id, text):
+    tg(
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": text
         }
-
-    tg("sendMessage", data)
+    )
 
 
 @app.get("/")
@@ -52,150 +43,67 @@ def webhook():
 
     update = request.get_json(silent=True) or {}
 
+    # Check normal messages
     message = update.get("message")
-    callback = update.get("callback_query")
-
-    # =========================
-    # MESSAGE HANDLER
-    # =========================
 
     if message:
 
-        chat_id = message["chat"]["id"]
-        user_id = message["from"]["id"]
+        chat = message.get("chat")
 
-        # /start
+        if chat:
+
+            chat_id = chat.get("id")
+            chat_type = chat.get("type")
+            chat_title = chat.get("title", "Unknown")
+
+            # Send Channel ID to the bot owner/admin
+            if chat_type in ["channel", "group", "supergroup"]:
+
+                send(
+                    chat_id,
+                    f"Channel/Chat Information\n\n"
+                    f"Title: {chat_title}\n"
+                    f"Type: {chat_type}\n"
+                    f"Chat ID: {chat_id}"
+                )
+
+                return "ok"
+
+        # /start from private chat
         if message.get("text") == "/start":
 
-            users[user_id] = {
-                "photo": False,
-                "reference": False
-            }
-
             send(
-                chat_id,
-                "📸 Please upload your photo first."
+                message["chat"]["id"],
+                "Send a message in your channel to get its Chat ID."
             )
 
             return "ok"
 
-        # Photo upload
-        if message.get("photo"):
+    # Check channel posts
+    channel_post = update.get("channel_post")
 
-            user = users.setdefault(
-                user_id,
+    if channel_post:
+
+        chat = channel_post.get("chat")
+
+        if chat:
+
+            chat_id = chat.get("id")
+            chat_title = chat.get("title", "Unknown")
+
+            # This sends the ID to the channel itself
+            # temporarily for testing.
+            tg(
+                "sendMessage",
                 {
-                    "photo": False,
-                    "reference": False
+                    "chat_id": chat_id,
+                    "text":
+                    f"Channel ID:\n{chat_id}\n\n"
+                    f"Channel: {chat_title}"
                 }
             )
 
-            # First photo
-            if not user["photo"]:
-
-                user["photo"] = True
-
-                send(
-                    chat_id,
-                    "✅ Your photo has been received.\n\n"
-                    "🖼️ Now please upload the reference clothes photo."
-                )
-
-            # Second photo
-            elif not user["reference"]:
-
-                user["reference"] = True
-
-                send(
-                    chat_id,
-                    "✅ Reference clothes photo has been received.",
-                    [
-                        [
-                            {
-                                "text": "👕 Change Clothes",
-                                "callback_data": "change"
-                            }
-                        ]
-                    ]
-                )
-
             return "ok"
-
-    # =========================
-    # BUTTON HANDLER
-    # =========================
-
-    if callback:
-
-        chat_id = callback["message"]["chat"]["id"]
-        user_id = callback["from"]["id"]
-        data = callback.get("data")
-
-        tg(
-            "answerCallbackQuery",
-            {
-                "callback_query_id": callback["id"]
-            }
-        )
-
-        user = users.setdefault(
-            user_id,
-            {
-                "photo": False,
-                "reference": False
-            }
-        )
-
-        # Change Clothes
-        if data == "change":
-
-            if not (
-                user["photo"]
-                and user["reference"]
-            ):
-
-                send(
-                    chat_id,
-                    "Please upload both photos first."
-                )
-
-            else:
-
-                send(
-                    chat_id,
-                    "📢 Please join both channels to continue:",
-                    [
-                        [
-                            {
-                                "text": "🔵 Join Channel 1",
-                                "url": CHANNEL_1
-                            }
-                        ],
-                        [
-                            {
-                                "text": "🔵 Join Channel 2",
-                                "url": CHANNEL_2
-                            }
-                        ],
-                        [
-                            {
-                                "text": "✅ I Joined / Verify",
-                                "callback_data": "verify"
-                            }
-                        ]
-                    ]
-                )
-
-        # Verify
-        elif data == "verify":
-
-            send(
-                chat_id,
-                "⏳ Processing your request...\n\n"
-                "Please wait while your request is being processed."
-            )
-
-        return "ok"
 
     return "ok"
 
@@ -205,4 +113,4 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=int(os.environ.get("PORT", "10000"))
-                )
+            )
