@@ -4,11 +4,15 @@ import requests
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change_me")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 
+# Admin Telegram User ID
+ADMIN_ID = 8455046701
+
+# Channel IDs
 CHANNEL_1_ID = -1004456013133
 CHANNEL_2_ID = -1004341825293
 
+# Channel invite links
 CHANNEL_1 = "https://t.me/+EVGePIY_vgk4MDU9"
 CHANNEL_2 = "https://t.me/+XVkf38u9H6s2Y2Q1"
 
@@ -26,17 +30,22 @@ stats = {
 }
 
 
+# --------------------------------------------------
+# TELEGRAM API
+# --------------------------------------------------
+
 def tg(method, data):
-    response = requests.post(
+    r = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/{method}",
         json=data,
         timeout=30
     )
-    response.raise_for_status()
-    return response.json()
+    r.raise_for_status()
+    return r.json()
 
 
 def send(chat_id, text, markup=None):
+
     data = {
         "chat_id": chat_id,
         "text": text
@@ -50,8 +59,14 @@ def send(chat_id, text, markup=None):
     tg("sendMessage", data)
 
 
-def is_member(channel_id, user_id):
+# --------------------------------------------------
+# CHECK CHANNEL MEMBERSHIP
+# --------------------------------------------------
+
+def is_joined(user_id, channel_id):
+
     try:
+
         result = tg(
             "getChatMember",
             {
@@ -76,21 +91,25 @@ def is_member(channel_id, user_id):
 
 
 def both_channels_joined(user_id):
-    return (
-        is_member(CHANNEL_1_ID, user_id)
-        and is_member(CHANNEL_2_ID, user_id)
-    )
+
+    channel1 = is_joined(user_id, CHANNEL_1_ID)
+    channel2 = is_joined(user_id, CHANNEL_2_ID)
+
+    return channel1 and channel2
 
 
-def join_screen():
+# --------------------------------------------------
+# JOIN + UPLOAD MENU
+# --------------------------------------------------
+
+def join_menu():
+
     return [
         [
             {
                 "text": "🔵 Join Channel 1",
                 "url": CHANNEL_1
-            }
-        ],
-        [
+            },
             {
                 "text": "🔵 Join Channel 2",
                 "url": CHANNEL_2
@@ -99,46 +118,56 @@ def join_screen():
         [
             {
                 "text": "📤 Upload Your Photo",
-                "callback_data": "upload"
+                "callback_data": "upload_photo"
             }
         ]
     ]
 
 
-def upload_screen():
+# --------------------------------------------------
+# PHOTO UPLOAD MENU
+# --------------------------------------------------
+
+def upload_menu():
+
     return [
         [
             {
                 "text": "📸 Upload Your Photo",
-                "callback_data": "photo_info"
+                "callback_data": "my_photo"
             }
         ],
         [
             {
                 "text": "🖼️ Upload Reference Photo",
-                "callback_data": "reference_info"
-            }
-        ],
-        [
-            {
-                "text": "👕 Remove Clothes",
-                "callback_data": "remove"
+                "callback_data": "reference_photo"
             }
         ]
     ]
 
 
+# --------------------------------------------------
+# START
+# --------------------------------------------------
+
 @app.get("/")
 def health():
-    return "Telegram bot is running."
 
+    return "Telegram Clothes Bot is running."
+
+
+# --------------------------------------------------
+# WEBHOOK
+# --------------------------------------------------
 
 @app.post("/telegram")
 def webhook():
 
+    # Verify Telegram webhook secret
     if request.headers.get(
         "X-Telegram-Bot-Api-Secret-Token"
     ) != WEBHOOK_SECRET:
+
         return "forbidden", 403
 
     update = request.get_json(silent=True) or {}
@@ -146,38 +175,70 @@ def webhook():
     message = update.get("message")
     callback = update.get("callback_query")
 
-    # =========================
+
+    # ==================================================
     # MESSAGE HANDLER
-    # =========================
+    # ==================================================
 
     if message:
 
         chat_id = message["chat"]["id"]
         user_id = message["from"]["id"]
 
-        # /start
-        if message.get("text") == "/start":
 
-            stats["starts"] += 1
+        # ----------------------------------------------
+        # /start
+        # ----------------------------------------------
+
+        if message.get("text") == "/start":
 
             users[user_id] = {
                 "photo": False,
-                "reference": False
+                "reference": False,
+                "waiting_for": None
             }
+
+            stats["starts"] += 1
 
             send(
                 chat_id,
                 "📢 Please join both channels first.\n\n"
-                "After joining both channels, "
-                "tap \"Upload Your Photo\" to continue.",
-                join_screen()
+                "After joining both channels, tap "
+                "\"Upload Your Photo\" to continue.",
+                join_menu()
             )
 
             return "ok"
 
-        # =========================
-        # PHOTO UPLOAD
-        # =========================
+
+        # ----------------------------------------------
+        # /stats
+        # ----------------------------------------------
+
+        if message.get("text") == "/stats":
+
+            if user_id != ADMIN_ID:
+                return "ok"
+
+            send(
+                chat_id,
+                "📊 BOT STATISTICS\n\n"
+                f"👤 Total Users: {len(users)}\n"
+                f"⭐ Total Starts: {stats['starts']}\n"
+                f"📸 Photo Uploads: {stats['photo_uploads']}\n"
+                f"🖼️ Reference Uploads: {stats['reference_uploads']}\n"
+                f"👕 Remove Clothes Clicks: {stats['remove_clicks']}\n"
+                f"🔎 Verify Attempts: {stats['verify_attempts']}\n"
+                f"✅ Successful Verifications: "
+                f"{stats['successful_verifications']}"
+            )
+
+            return "ok"
+
+
+        # ----------------------------------------------
+        # PHOTO MESSAGE
+        # ----------------------------------------------
 
         if message.get("photo"):
 
@@ -185,60 +246,107 @@ def webhook():
                 user_id,
                 {
                     "photo": False,
-                    "reference": False
+                    "reference": False,
+                    "waiting_for": None
                 }
             )
 
-            # Check membership before accepting uploads
+
+            # Check membership before accepting photo
+
             if not both_channels_joined(user_id):
 
                 send(
                     chat_id,
-                    "❌ Please join both channels first.\n\n"
-                    "After joining both channels, "
-                    "tap \"Upload Your Photo\" again.",
-                    join_screen()
+                    "📢 Please join both channels first.\n\n"
+                    "You must join both channels before "
+                    "uploading photos.",
+                    join_menu()
                 )
 
                 return "ok"
 
-            # First photo
-            if not user["photo"]:
+
+            # ------------------------------------------
+            # User photo
+            # ------------------------------------------
+
+            if user["waiting_for"] == "my_photo":
 
                 user["photo"] = True
+                user["waiting_for"] = None
+
                 stats["photo_uploads"] += 1
 
                 send(
                     chat_id,
                     "✅ Your photo has been received.\n\n"
-                    "🖼️ Now upload your reference clothes photo.",
-                    upload_screen()
+                    "Now upload your reference clothes photo.",
+                    [
+                        [
+                            {
+                                "text": "🖼️ Upload Reference Photo",
+                                "callback_data": "reference_photo"
+                            }
+                        ]
+                    ]
                 )
 
-            # Second photo
-            elif not user["reference"]:
+                return "ok"
+
+
+            # ------------------------------------------
+            # Reference photo
+            # ------------------------------------------
+
+            if user["waiting_for"] == "reference_photo":
 
                 user["reference"] = True
+                user["waiting_for"] = None
+
                 stats["reference_uploads"] += 1
 
                 send(
                     chat_id,
-                    "✅ Reference clothes photo has been received.\n\n"
-                    "You can now tap \"Remove Clothes\".",
-                    upload_screen()
+                    "✅ Reference clothes photo received.",
+                    [
+                        [
+                            {
+                                "text": "👕 Remove Clothes",
+                                "callback_data": "remove_clothes"
+                            }
+                        ]
+                    ]
                 )
+
+                return "ok"
+
+
+            # ------------------------------------------
+            # Photo sent without pressing upload
+            # ------------------------------------------
+
+            send(
+                chat_id,
+                "📢 Please use the upload button first.",
+                upload_menu()
+            )
 
             return "ok"
 
-    # =========================
+
+    # ==================================================
     # BUTTON HANDLER
-    # =========================
+    # ==================================================
 
     if callback:
 
         chat_id = callback["message"]["chat"]["id"]
         user_id = callback["from"]["id"]
         data = callback.get("data")
+
+
+        # Remove Telegram loading
 
         tg(
             "answerCallbackQuery",
@@ -247,123 +355,144 @@ def webhook():
             }
         )
 
+
         user = users.setdefault(
             user_id,
             {
                 "photo": False,
-                "reference": False
+                "reference": False,
+                "waiting_for": None
             }
         )
 
-        # =========================
-        # UPLOAD BUTTON
-        # =========================
 
-        if data == "upload":
+        # ----------------------------------------------
+        # UPLOAD YOUR PHOTO
+        # ----------------------------------------------
+
+        if data == "upload_photo":
+
+            stats["verify_attempts"] += 1
+
+            # IMPORTANT:
+            # Check both channels before allowing upload
 
             if not both_channels_joined(user_id):
 
                 send(
                     chat_id,
-                    "❌ Please join both channels first.\n\n"
-                    "You must join both channels before "
-                    "uploading your photo.",
-                    join_screen()
+                    "📢 Please join both channels first.\n\n"
+                    "After joining both channels, tap "
+                    "\"Upload Your Photo\" again.",
+                    join_menu()
                 )
 
             else:
 
                 send(
                     chat_id,
-                    "📤 Upload section\n\n"
-                    "Please upload your photo and then "
-                    "your reference clothes photo.",
-                    upload_screen()
+                    "✅ Both channels joined successfully.\n\n"
+                    "Now choose what you want to upload:",
+                    upload_menu()
                 )
 
-        # =========================
-        # PHOTO INFO BUTTON
-        # =========================
+            return "ok"
 
-        elif data == "photo_info":
+
+        # ----------------------------------------------
+        # MY PHOTO
+        # ----------------------------------------------
+
+        if data == "my_photo":
 
             if not both_channels_joined(user_id):
 
                 send(
                     chat_id,
-                    "❌ Please join both channels first.",
-                    join_screen()
-                )
-
-            else:
-
-                send(
-                    chat_id,
-                    "📸 Please send your photo here."
-                )
-
-        # =========================
-        # REFERENCE INFO BUTTON
-        # =========================
-
-        elif data == "reference_info":
-
-            if not both_channels_joined(user_id):
-
-                send(
-                    chat_id,
-                    "❌ Please join both channels first.",
-                    join_screen()
-                )
-
-            else:
-
-                send(
-                    chat_id,
-                    "🖼️ Please send your reference clothes photo here."
-                )
-
-        # =========================
-        # REMOVE CLOTHES
-        # =========================
-
-        elif data == "remove":
-
-            stats["remove_clicks"] += 1
-
-            # Check membership again
-            if not both_channels_joined(user_id):
-
-                send(
-                    chat_id,
-                    "❌ Please join both channels first.",
-                    join_screen()
+                    "📢 Please join both channels first.",
+                    join_menu()
                 )
 
                 return "ok"
+
+
+            user["waiting_for"] = "my_photo"
+
+            send(
+                chat_id,
+                "📸 Please send your photo now."
+            )
+
+            return "ok"
+
+
+        # ----------------------------------------------
+        # REFERENCE PHOTO
+        # ----------------------------------------------
+
+        if data == "reference_photo":
+
+            if not both_channels_joined(user_id):
+
+                send(
+                    chat_id,
+                    "📢 Please join both channels first.",
+                    join_menu()
+                )
+
+                return "ok"
+
+
+            user["waiting_for"] = "reference_photo"
+
+            send(
+                chat_id,
+                "🖼️ Please send your reference clothes photo now."
+            )
+
+            return "ok"
+
+
+        # ----------------------------------------------
+        # REMOVE CLOTHES
+        # ----------------------------------------------
+
+        if data == "remove_clothes":
+
+            if not both_channels_joined(user_id):
+
+                send(
+                    chat_id,
+                    "📢 Please join both channels first.",
+                    join_menu()
+                )
+
+                return "ok"
+
 
             if not user["photo"]:
 
                 send(
                     chat_id,
                     "📸 Please upload your photo first.",
-                    upload_screen()
+                    upload_menu()
                 )
 
                 return "ok"
+
 
             if not user["reference"]:
 
                 send(
                     chat_id,
                     "🖼️ Please upload your reference clothes photo first.",
-                    upload_screen()
+                    upload_menu()
                 )
 
                 return "ok"
 
-            stats["verify_attempts"] += 1
-            stats["successful_verifications"] += 1
+
+            stats["remove_clicks"] += 1
 
             send(
                 chat_id,
@@ -371,32 +500,15 @@ def webhook():
                 "Please wait while your request is being processed."
             )
 
-        # =========================
-        # ADMIN STATS
-        # =========================
+            return "ok"
 
-        elif data == "stats":
-
-            if user_id != ADMIN_ID:
-                return "ok"
-
-            send(
-                chat_id,
-                f"📊 Bot Statistics\n\n"
-                f"👤 Total Users: {len(users)}\n"
-                f"⭐ Total Starts: {stats['starts']}\n"
-                f"📸 Photo Uploads: {stats['photo_uploads']}\n"
-                f"🖼️ Reference Uploads: {stats['reference_uploads']}\n"
-                f"👕 Remove Clothes Clicks: {stats['remove_clicks']}\n"
-                f"🔗 Verify Attempts: {stats['verify_attempts']}\n"
-                f"✅ Successfully Verified: "
-                f"{stats['successful_verifications']}"
-            )
-
-        return "ok"
 
     return "ok"
 
+
+# --------------------------------------------------
+# RUN SERVER
+# --------------------------------------------------
 
 if __name__ == "__main__":
 
